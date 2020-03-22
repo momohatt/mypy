@@ -1367,11 +1367,11 @@ class ExpressionChecker(ExpressionVisitor[Type]):
         ok = True  # False if we've found any error
 
         for i, kind in enumerate(actual_kinds):
-            if i not in all_actuals and (
-                    kind != nodes.ARG_STAR or
+            if i not in all_actuals and not (
                     # We accept the other iterables than tuple (including Any)
                     # as star arguments because they could be empty, resulting no arguments.
-                    is_non_empty_tuple(actual_types[i])):
+                    (kind == nodes.ARG_STAR and not is_non_empty_tuple(actual_types[i])) or
+                    (kind == nodes.ARG_STAR2 and not is_non_empty_dict(actual_types[i]))):
                 # Extra actual: not matched by a formal argument.
                 ok = False
                 if kind != nodes.ARG_NAMED:
@@ -3790,9 +3790,12 @@ class ExpressionChecker(ExpressionVisitor[Type]):
     def is_valid_keyword_var_arg(self, typ: Type) -> bool:
         """Is a type valid as a **kwargs argument?"""
         if self.chk.options.python_version[0] >= 3:
-            return is_subtype(typ, self.chk.named_generic_type(
-                'typing.Mapping', [self.named_type('builtins.str'),
-                                   AnyType(TypeOfAny.special_form)]))
+            return (
+                is_subtype(typ, self.chk.named_generic_type(
+                    'typing.Mapping', [self.named_type('builtins.str'),
+                                       AnyType(TypeOfAny.special_form)])) or
+                is_subtype(typ, self.chk.named_generic_type(
+                    'typing.Mapping', [UninhabitedType(), UninhabitedType()])))
         else:
             return (
                 is_subtype(typ, self.chk.named_generic_type(
@@ -4075,6 +4078,14 @@ def is_async_def(t: Type) -> bool:
 def is_non_empty_tuple(t: Type) -> bool:
     t = get_proper_type(t)
     return isinstance(t, TupleType) and bool(t.items)
+
+
+def is_non_empty_dict(t: Type) -> bool:
+    t = get_proper_type(t)
+    if isinstance(t, Instance) and t.type.fullname == 'builtins.dict':
+        t = get_proper_type(t.args[0])
+        return not isinstance(t, UninhabitedType)
+    return False
 
 
 def is_duplicate_mapping(mapping: List[int], actual_kinds: List[int]) -> bool:
